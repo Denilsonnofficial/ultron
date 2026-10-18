@@ -235,6 +235,15 @@ COMANDOS = {
 }
 
 
+def _nomes_temas():
+    """Chaves dos temas do gadget (a mesma lista nos três assistentes, sem cópia escrita à mão)."""
+    try:
+        from .gadget import TEMAS
+        return list(TEMAS)
+    except Exception:
+        return []
+
+
 class Harness:
     def __init__(self):
         self.cfg = config.carregar()
@@ -735,7 +744,7 @@ class Harness:
             subs = {"/genero": ["masculino", "feminino"], "/autonomia": ["alto", "medio", "baixo"],
                     "/base": ["ligar", "desligar"], "/skill": ["nova", "ver", "remover", "listar"],
                     "/raciocinio": ["padrao", "baixo", "medio", "alto", "maximo"],
-                    "/tema": ["ultron", "r2d2", "sabre", "rebelde", "bb8", "estrela", "holograma", "azul", "reator", "hal", "ambar", "esmeralda", "neon", "retro", "aurora", "grafite"]}.get(cmd, [])
+                    "/tema": _nomes_temas()}.get(cmd, [])
             op = [s + " " for s in subs if s.startswith(resto)]
         return op[estado] if estado < len(op) else None
 
