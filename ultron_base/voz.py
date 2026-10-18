@@ -45,8 +45,15 @@ class Ouvido:
 
         t0 = time.time()
         pasta = os.path.join(MODELOS, "whisper")
+        def abrir(**kw):
+            # local primeiro: nada vai para a internet se o modelo já está baixado
+            try:
+                return WhisperModel(tamanho, download_root=pasta, local_files_only=True, **kw)
+            except Exception:
+                return WhisperModel(tamanho, download_root=pasta, **kw)
+
         try:
-            self.modelo = WhisperModel(tamanho, device="cuda", compute_type="int8_float16", download_root=pasta)
+            self.modelo = abrir(device="cuda", compute_type="int8_float16")
             self.dispositivo = "GPU"
         except Exception as e:                       # sem GPU/CUDA: CPU (bem mais lento)
             log.warning("whisper na GPU falhou (%s); usando CPU com o modelo small", e)

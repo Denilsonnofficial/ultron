@@ -58,7 +58,8 @@ class Cerebro:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as h:
                 async with h.get(OLLAMA + "/api/tags") as r:
                     dados = await r.json()
-            return sorted(f"ollama/{m['name']}" for m in dados.get("models", []))
+            nomes = (m["name"].removesuffix(":latest") for m in dados.get("models", []))
+            return sorted(f"ollama/{n}" for n in nomes)
         except Exception as e:
             log.warning("Ollama não respondeu: %s", e)
             return []
