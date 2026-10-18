@@ -6,7 +6,7 @@ por voz e controla o computador, sem mandar nada para a internet. Fork do
 com o cérebro, a transcrição e a voz rodando na própria máquina, e o harness **snake** (embutido)
 no lugar do opencode.
 
-Estado: **1.1.0** (cérebro `brain-ultron`, voz XTTS-v2, gadget plasma, snake atualizado). Feito e medido numa RTX 3060 12 GB + Xeon E5-2680 v3 + 32 GB.
+Estado: **1.1.0** (cérebro `brain-ultron`, gadget plasma, snake atualizado). Feito e medido numa RTX 3060 12 GB + Xeon E5-2680 v3 + 32 GB.
 
 ## Instalar
 
@@ -45,7 +45,7 @@ gadget (holograma) ◄── Kokoro pm_alex/pf_dora (CPU) ◄── frases ◄�
 |---|---|---|
 | Modelo | Qwen3.5 9B (`reasoning_effort: none`) | 1ª palavra em 0,15 s; resposta curta em 1,8 s; com ferramenta (bash) ~10 s pelo snake; ~6 GB de VRAM |
 | Transcrição | faster-whisper large-v3-turbo int8 na GPU | 6 s de fala em 0,33 s; ~0,8 GB de VRAM; acertou até "Ultron" |
-| Voz | **XTTS-v2** na GPU (padrão, ~2 GB de VRAM, voz `Damien Black`; troque com `ULTRON_VOZ_MASCULINA`), Kokoro-82M como reserva (`ULTRON_VOZ=kokoro`) | XTTS ~2x mais rápido que o tempo real |
+| Voz | Kokoro-82M onnx, vozes pt-BR pm_alex (padrão), pm_santa, pf_dora; opcional: XTTS-v2 na GPU (`ULTRON_VOZ_XTTS=1 ./instalar.sh` e `ULTRON_VOZ=xtts`) | ~4x mais rápido que o tempo real na CPU |
 | Harness | snake (embutido em `snake/`) | passou no `check-models` com o Qwen |
 
 Escolhas e porquês:

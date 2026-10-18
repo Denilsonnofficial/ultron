@@ -153,9 +153,11 @@ PY="$RAIZ/venv/bin/python"
 passo "Pacotes de voz (Whisper na GPU, Kokoro) — alguns GB na primeira vez"
 "$PY" -m pip install -q --disable-pip-version-check aiohttp websockets numpy vosk sounddevice \
   faster-whisper nvidia-cublas-cu12 nvidia-cudnn-cu12 kokoro-onnx
-passo "Voz XTTS-v2 (GPU, natural em pt-BR) — torch + coqui-tts"
+if [ "${ULTRON_VOZ_XTTS:-0}" = 1 ]; then
+passo "Voz XTTS-v2 opcional (GPU) — torch + coqui-tts"
 "$PY" -m pip install -q --disable-pip-version-check torch torchaudio torchcodec coqui-tts "transformers==4.55.4" soundfile \
   || aviso "XTTS não instalou: o Ultron usa o Kokoro"
+fi
 if ! "$PY" -c 'import PySide6.QtWidgets' 2>/dev/null; then
   passo "Instalando a interface (PySide6)"
   "$PY" -m pip install -q --disable-pip-version-check PySide6-Essentials
@@ -170,7 +172,7 @@ chmod +x "$APP"/bin/* "$APP/snake/bin/snake.js"
 
 # ---------------------------------------------------------------- modelos de voz
 mkdir -p "$DADOS/modelos/kokoro" "$DADOS/modelos/xtts"
-if ! ls "$DADOS"/modelos/xtts/tts/*xtts_v2*/model.pth >/dev/null 2>&1; then
+if [ "${ULTRON_VOZ_XTTS:-0}" = 1 ] && ! ls "$DADOS"/modelos/xtts/tts/*xtts_v2*/model.pth >/dev/null 2>&1; then
   passo "Baixando a voz XTTS-v2 (1,9 GB, só nesta vez; depois roda 100% local)"
   COQUI_TOS_AGREED=1 TTS_HOME="$DADOS/modelos/xtts" "$PY" -c \
     'from TTS.utils.manage import ModelManager; ModelManager().download_model("tts_models/multilingual/multi-dataset/xtts_v2")' \

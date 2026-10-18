@@ -1,5 +1,5 @@
 """Voz 100% local: fala -> texto com faster-whisper na GPU (large-v3-turbo) e texto -> fala com
-XTTS-v2 (GPU, voz grave e natural em pt-BR) ou, se ele não estiver instalado, Kokoro (onnx, CPU).
+Kokoro (onnx, CPU; padrão) ou, opcionalmente, XTTS-v2 (GPU; ULTRON_VOZ=xtts).
 Toda a saída é PCM s16le, 24 kHz, mono.
 
 Medido numa RTX 3060: 6 s de fala transcritos em 0,33 s (~0,8 GB de VRAM); Kokoro gera ~4x mais
@@ -24,7 +24,7 @@ VOZES = {"masculino": "pm_alex", "feminino": "pf_dora"}
 # vozes do XTTS-v2 (grave para o Ultron); troque com ULTRON_VOZ_MASCULINA / ULTRON_VOZ_FEMININA
 VOZES_XTTS = {"masculino": os.environ.get("ULTRON_VOZ_MASCULINA", "Damien Black"),
               "feminino": os.environ.get("ULTRON_VOZ_FEMININA", "Ana Florence")}
-MOTOR = os.environ.get("ULTRON_VOZ", "xtts")      # xtts | kokoro
+MOTOR = os.environ.get("ULTRON_VOZ", "kokoro")    # kokoro (padrão) | xtts (opcional, ULTRON_VOZ=xtts)
 # grafias que o Kokoro pronuncia melhor
 PRONUNCIA = {r"\bUltron\b": "Últron", r"\bultron\b": "últron", r"\bIA\b": "I A", r"\bGPU\b": "gê pê u"}
 
@@ -170,7 +170,7 @@ class BocaXTTS:
 
 
 class Boca:
-    """Escolhe o motor de voz (XTTS por padrão); se ele não estiver instalado ou falhar, cai para o Kokoro."""
+    """Escolhe o motor de voz (Kokoro por padrão); com ULTRON_VOZ=xtts usa o XTTS e, se falhar, cai para o Kokoro."""
 
     def __init__(self, genero="masculino"):
         self.genero = genero
