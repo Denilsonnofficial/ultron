@@ -41,5 +41,5 @@ For each function call, return a json object with function name and arguments wi
 {{- end }}"""
 PARAMETER stop "<|im_start|>"
 PARAMETER stop "<|im_end|>"
-PARAMETER temperature 0.7
+PARAMETER temperature 0.5
 PARAMETER num_ctx 16384

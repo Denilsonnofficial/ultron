@@ -384,7 +384,20 @@ Reescreva a memória inteira incorporando a conversa nova. Regras:
         # apelidos de várias palavras ("o trono") existem só para o Vosk acordar; aqui quem decide é a
         # transcrição do Whisper, que escreve o nome certo
         simples = [a for a in apelidos if " " not in a.strip()]
-        return any(self.nome_presente(texto, n) for n in [self.persona["nome"], *simples])
+        if any(self.nome_presente(texto, n) for n in [self.persona["nome"], *simples]):
+            return True
+        return self.nome_comido_pelo_whisper(texto, dica)
+
+    @staticmethod
+    def nome_comido_pelo_whisper(texto, dica):
+        """O Vosk acordou com uma ou duas palavras antes da frase ("outro você está aí") e o Whisper escreveu só a
+        frase ("você está aí"): ele perdeu a palavra de acordar, não a fala. Se o resto bate, vale a detecção local."""
+        pw, pd = sem_acento(texto).lower().split(), sem_acento(dica or "").lower().split()
+        pw = [re.sub(r"\W", "", x) for x in pw if re.sub(r"\W", "", x)]
+        pd = [re.sub(r"\W", "", x) for x in pd if re.sub(r"\W", "", x)]
+        if len(pw) < 2 or not 1 <= len(pd) - len(pw) <= 2:
+            return False
+        return difflib.SequenceMatcher(None, " ".join(pd[len(pd) - len(pw):]), " ".join(pw)).ratio() >= 0.8
 
     def nome_presente(self, texto, nome=None):
         alvo = fonetico(nome or self.persona["nome"])

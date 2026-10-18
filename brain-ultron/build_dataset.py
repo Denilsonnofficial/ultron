@@ -242,22 +242,37 @@ def tool_examples():
     return ex
 
 
+def sistemas():
+    """Variedade de system prompts: o curto do Brain-Ultron, o de voz do assistente (prompt.md do Ultron), genérico e nenhum."""
+    voz = ""
+    try:
+        voz = open("prompt.md", encoding="utf-8").read()
+    except OSError:
+        pass
+    return [SYSTEM, SYSTEM, (SYSTEM + "\n\n" + voz) if voz else SYSTEM, "Você é um assistente prestativo.", None]
+
+
 def main():
+    import os
     rows = []
-    for q, a in PERSONA + TECH:
-        rows.append({"tools": None, "messages": [
-            {"role": "system", "content": SYSTEM}, {"role": "user", "content": q}, {"role": "assistant", "content": a}]})
-    # persona também sob system prompts genéricos / ausentes (persona permanente)
-    for q, a in PERSONA:
-        for sp in ["Você é um assistente prestativo.", None]:
-            msgs = ([{"role": "system", "content": sp}] if sp else []) + [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
-            rows.append({"tools": None, "messages": msgs})
+    pares = list(PERSONA) + list(TECH)
+    if os.path.exists("data/destilado.jsonl"):       # respostas na persona geradas por um modelo local (gen_dataset.py)
+        for l in open("data/destilado.jsonl", encoding="utf-8"):
+            d = json.loads(l)
+            pares.append((d["q"], d["a"]))
+    sp = sistemas()
+    for q, a in pares:       # cada exemplo entra UMA vez (duplicar vira decoreba)
+        sistema = random.choice(sp)
+        msgs = ([{"role": "system", "content": sistema}] if sistema else []) + [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
+        rows.append({"tools": None, "messages": msgs})
     rows += tool_examples()
     random.shuffle(rows)
-    with open("data/brain_ultron.jsonl", "w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"{len(rows)} exemplos -> data/brain_ultron.jsonl")
+    corte = max(1, int(len(rows) * 0.08))
+    for nome, parte in (("brain_ultron.jsonl", rows[corte:]), ("validacao.jsonl", rows[:corte])):
+        with open("data/" + nome, "w", encoding="utf-8") as f:
+            for r in parte:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    print(f"{len(rows) - corte} treino + {corte} validação")
 
 
 if __name__ == "__main__":

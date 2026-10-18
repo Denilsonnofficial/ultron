@@ -74,7 +74,7 @@ class Ouvido:
             return ""
         segs, _ = self.modelo.transcribe(
             audio, language="pt", beam_size=1, temperature=0.0, condition_on_previous_text=False,
-            vad_filter=True, vad_parameters={"min_silence_duration_ms": 500, "threshold": 0.35, "speech_pad_ms": 400},
+            vad_filter=True, vad_parameters={"min_silence_duration_ms": 500, "threshold": 0.35, "speech_pad_ms": 800},
             initial_prompt=f"{nome}," if nome else None, without_timestamps=True,
         )
         return " ".join(s.text.strip() for s in segs).strip()

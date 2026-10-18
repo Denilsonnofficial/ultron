@@ -23,7 +23,7 @@ O instalador (usuário comum; sudo só para pacotes do sistema e para instalar o
    do PulseAudio/PipeWire, libnotify, Qt.
 2. Instala o **Ollama** se não houver e registra o cérebro **`brain-ultron`** (Qwen2.5 7B abliterated + QLoRA
    com a persona do Ultron de *Era de Ultron* e tool calling; janela de 16 mil tokens). O GGUF (4,7 GB) é baixado da
-   [release `brain-ultron-v1`](https://github.com/Denilsonnofficial/ultron/releases/tag/brain-ultron-v1) em 3 partes e
+   [release `brain-ultron-v2`](https://github.com/Denilsonnofficial/ultron/releases/tag/brain-ultron-v2) em 3 partes e
    conferido por SHA256. Para usar um arquivo seu: `BRAIN_ULTRON_GGUF=/caminho/modelo.gguf ./instalar.sh`. Sem o
    brain-ultron, cai para o Qwen3.5 9B. Como foi treinado: pasta `brain-ultron/`.
 3. Ambiente Python próprio em `~/.local/share/ultron/venv` com faster-whisper + CUDA (cuBLAS/cuDNN
