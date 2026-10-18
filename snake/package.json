@@ -1,0 +1,43 @@
+{
+  "name": "snake-harness",
+  "version": "0.3.0",
+  "description": "Snake — harness de agente de código para o terminal: modelos grátis, multi-provedor (OpenRouter, Anthropic, OpenAI, Gemini, Groq, Ollama...), painel de tokens/cache/custo e modo YOLO por padrão.",
+  "type": "module",
+  "bin": {
+    "snake": "bin/snake.js"
+  },
+  "main": "src/index.js",
+  "exports": "./src/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node bin/snake.js",
+    "test": "node --test test/*.test.js",
+    "logo": "node bin/snake.js logo",
+    "assets": "node scripts/gerar-logo.mjs --png",
+    "check": "node scripts/check.mjs",
+    "github": "bash scripts/publicar-github.sh"
+  },
+  "files": [
+    "bin",
+    "src",
+    "assets",
+    "docs",
+    "README.md",
+    "PROJETO.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "coding-agent",
+    "cli",
+    "tui",
+    "harness",
+    "openrouter",
+    "llm",
+    "yolo"
+  ],
+  "license": "MIT"
+}

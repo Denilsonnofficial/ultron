@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""Consulta a memória de longo prazo (todas as conversas desde o primeiro dia).
+
+uso: ultron-lembrar "palavras da busca"
+     ultron-lembrar --dia 2026-10-17
+     ultron-lembrar --resumos        (versões antigas da memória de curto prazo)
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from ultron_base.memoria import Memoria, fmt_ts  # noqa: E402
+
+m = Memoria()
+args = sys.argv[1:]
+if not args:
+    print(__doc__)
+    sys.exit(1)
+if args[0] == "--dia" and len(args) > 1:
+    linhas = m.do_dia(args[1])
+    if not linhas:
+        print("Nada registrado nesse dia.")
+    for ts, quem, texto in linhas:
+        print(f"[{fmt_ts(ts)}] {quem}: {texto}")
+elif args[0] == "--resumos":
+    for ts, texto in m.db.execute("SELECT ts, texto FROM curta_versoes ORDER BY id DESC LIMIT 5"):
+        print(f"===== versão de {fmt_ts(ts)} =====\n{texto}\n")
+else:
+    achados = m.buscar(" ".join(args))
+    if not achados:
+        print("Nada encontrado na memória de longo prazo.")
+    for ts, quem, texto, viz in achados:
+        print(f"[{fmt_ts(ts)}] {quem}: {texto}")
+        for q, t in viz:
+            print(f"    ({q}: {t[:300]})")
+        print()

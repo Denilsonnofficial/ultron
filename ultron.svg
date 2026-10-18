@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <radialGradient id="fundo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#0d2a4a"/><stop offset="0.7" stop-color="#07131f"/><stop offset="1" stop-color="#04080d"/>
+    </radialGradient>
+    <radialGradient id="brilho" cx="50%" cy="45%" r="50%">
+      <stop offset="0" stop-color="#4fb4ff" stop-opacity="0.55"/><stop offset="1" stop-color="#4fb4ff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="luz" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <pattern id="varredura" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="1.2" fill="#6cc8ff" opacity="0.18"/>
+    </pattern>
+  </defs>
+  <circle cx="128" cy="128" r="122" fill="url(#fundo)" stroke="#3fa0ff" stroke-opacity="0.4" stroke-width="2"/>
+  <ellipse cx="128" cy="120" rx="80" ry="96" fill="url(#brilho)"/>
+  <g id="rosto">
+    <path d="M128 30 L172 42 L196 82 L192 132 L168 180 L128 210 L88 180 L64 132 L60 82 L84 42 Z"
+          fill="#3fa0ff" fill-opacity="0.16" stroke="#8fd4ff" stroke-width="3" filter="url(#luz)"/>
+    <path d="M128 30 L172 42 L196 82 L192 132 L168 180 L128 210 L88 180 L64 132 L60 82 L84 42 Z" fill="url(#varredura)"/>
+    <g stroke="#6cc8ff" stroke-opacity="0.45" stroke-width="1.3" fill="none">
+      <path d="M128 30 V82 M84 42 L128 82 L172 42 M60 82 L128 82 L196 82 M64 132 L101 108 L128 132 L155 108 L192 132"/>
+      <path d="M88 180 L128 160 L168 180 M101 108 L128 82 L155 108 M128 132 V160 L108 172 M128 160 L148 172"/>
+    </g>
+    <g filter="url(#luz)" fill="#e6f6ff">
+      <path d="M86 102 L118 94 L120 106 L90 114 Z"/><path d="M170 102 L138 94 L136 106 L166 114 Z"/>
+    </g>
+    <path d="M100 168 L128 164 L156 168 L128 176 Z" fill="#9fdcff" filter="url(#luz)"/>
+  </g>
+</svg>

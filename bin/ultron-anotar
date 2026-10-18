@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Grava um fato permanente no perfil (nunca é esquecido).
+
+uso: ultron-anotar "O usuário prefere respostas curtas"
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from ultron_base.memoria import Memoria  # noqa: E402
+
+fato = " ".join(sys.argv[1:]).strip()
+if not fato:
+    print(__doc__)
+    sys.exit(1)
+Memoria().anotar_perfil(fato)
+print("Anotado no perfil permanente.")

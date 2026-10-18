@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Mostra e troca o modelo que a base usa.
+
+uso: ultron-modelo                      modelo atual e os grátis
+     ultron-modelo listar <filtro>      procura entre todos (ex.: claude, deepseek, free)
+     ultron-modelo raciocinio [nivel]   mostra/troca o nível: padrao, baixo, medio, alto, maximo
+     ultron-modelo trocar <nome>        troca (aceita pedaço do nome: "deepseek", "glm 5.3")
+"""
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+URL = f"http://127.0.0.1:{os.environ.get('ULTRON_PORTA', '8792')}/modelo"
+
+
+def chamar(corpo=None):
+    req = urllib.request.Request(URL, data=json.dumps(corpo).encode() if corpo else None,
+                                 headers={"Content-Type": "application/json"}, method="POST" if corpo else "GET")
+    try:
+        return json.load(urllib.request.urlopen(req, timeout=60))
+    except urllib.error.HTTPError as e:
+        return json.load(e)
+
+
+def chave(s):
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
+def rotulo(m):
+    return f"{m['id']}  ({'grátis' if m['gratis'] else 'PAGO'})"
+
+
+args0 = sys.argv[1:]
+if args0[:1] == ["raciocinio"]:
+    url = URL.rsplit("/", 1)[0] + "/raciocinio"
+    corpo = {"nivel": args0[1]} if len(args0) > 1 else None
+    req = urllib.request.Request(url, data=json.dumps(corpo).encode() if corpo else None,
+                                 headers={"Content-Type": "application/json"}, method="POST" if corpo else "GET")
+    try:
+        r = json.load(urllib.request.urlopen(req, timeout=30))
+    except urllib.error.HTTPError as e:
+        r = json.load(e)
+    if r.get("erro"):
+        sys.exit(r["erro"])
+    print(f"Raciocínio: {r['nivel']} (variante do modelo: {r['variante'] or 'nenhuma; vale como instrução no prompt'})")
+    sys.exit(0)
+info = chamar()
+todos = info["disponiveis"]
+args = sys.argv[1:]
+if not args:
+    print(f"Atual: {info['atual']}\nGrátis ({sum(m['gratis'] for m in todos)} de {len(todos)}; use 'listar <filtro>' para os outros):")
+    for m in todos:
+        if m["gratis"]:
+            print("  " + rotulo(m))
+    sys.exit(0)
+if args[0] == "listar":
+    filtro = chave(" ".join(args[1:]))
+    achados = [m for m in todos if filtro in chave(m["id"])]
+    print("\n".join("  " + rotulo(m) for m in achados[:60]) or "Nenhum.")
+    if len(achados) > 60:
+        print(f"  ... e mais {len(achados) - 60}; refine o filtro")
+    sys.exit(0)
+if args[0] != "trocar" or len(args) < 2:
+    print(__doc__)
+    sys.exit(1)
+ids = [m["id"] for m in todos]
+pedido = " ".join(args[1:])
+achados = [pedido] if pedido in ids else [m for m in ids if chave(pedido) in chave(m)]
+if not achados:
+    partes = [chave(p) for p in args[1:] if chave(p)]
+    achados = [m for m in ids if all(p in chave(m) for p in partes)]
+if len(achados) != 1:
+    print(("Mais de um modelo combina: " + ", ".join(achados[:30])) if achados else "Nenhum modelo combina; use 'listar <filtro>'.")
+    sys.exit(2)
+r = chamar({"modelo": achados[0]})
+print(r.get("erro") or f"Trocado para {r['atual']}. Vale a partir da próxima fala.")
