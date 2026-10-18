@@ -378,7 +378,10 @@ Reescreva a memória inteira incorporando a conversa nova. Regras:
         costuma comer ou trocar ("raw" vira "How"): aí vale a detecção local."""
         if len(fonetico(self.persona["nome"])) <= 4:
             return True
-        return any(self.nome_presente(t, n) for t in (texto, dica) for n in [self.persona["nome"], *apelidos])
+        # apelidos de várias palavras ("o trono") existem só para o Vosk acordar; aqui quem decide é a
+        # transcrição do Whisper, que escreve o nome certo
+        simples = [a for a in apelidos if " " not in a.strip()]
+        return any(self.nome_presente(texto, n) for n in [self.persona["nome"], *simples])
 
     def nome_presente(self, texto, nome=None):
         alvo = fonetico(nome or self.persona["nome"])

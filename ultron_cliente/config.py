@@ -11,7 +11,8 @@ PADRAO = {
     "token": "",
     "nome": "Ultron",
     # como o nome costuma ser falado e ouvido (a calibração acrescenta os da sua voz)
-    "apelidos": ["ultrom", "ultron"],
+    # o Vosk pequeno ouve "Ultron" como "o trono"/"o tronco"; o Whisper da base confirma o nome de verdade
+    "apelidos": ["o trono", "o tronco", "ultrom", "ultron"],
     "sensibilidade": 0.78,   # 0..1, maior = exige pronúncia mais parecida
     "microfone": None,       # nome do dispositivo de entrada, None = padrão do sistema
     "mudo": False,

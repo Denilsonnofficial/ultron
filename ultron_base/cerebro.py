@@ -209,12 +209,11 @@ class Cerebro:
                     if dados.get("type") == "text" and dados.get("delta"):
                         yield ("texto", dados["delta"])
                 elif tipo == "tool-start":
+                    yield ("texto", "\n")            # separa o que veio antes do que vem depois da ferramenta
                     nome = (dados.get("tool") or {}).get("name") if isinstance(dados.get("tool"), dict) else dados.get("tool")
                     yield ("ferramenta", nome or "ferramenta", "running", dados.get("summary") or "")
                 elif tipo == "tool-end":
                     yield ("ferramenta", "ferramenta", "completed", "")
-                elif tipo == "assistant" and dados.get("step", 1) > 1:
-                    yield ("texto", "\n")     # passo novo depois de ferramenta: separa as frases
                 elif tipo == "permission":
                     yield ("permissao", {"id": dados.get("id"), "permission": "bash" if dados.get("tool") == "bash" else dados.get("tool"),
                                          "metadata": {"command": (dados.get("args") or {}).get("command", ""),
