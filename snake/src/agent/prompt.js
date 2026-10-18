@@ -130,6 +130,7 @@ export function buildSystemPrompt({ cwd, modelLabel, mode = 'yolo', subagent = f
 - Large tool outputs are truncated and the full text is saved to a file whose path is shown; read that file with offset/limit or grep it instead of re-running the command.
 - \`edit\` replaces one exact snippet; \`multiedit\` applies several edits to one file atomically; \`apply_patch\` applies a multi-file patch (*** Begin Patch format). Never include the read line-number prefix in old_string.${subagent ? '' : '\n- `task` launches a sub-agent with a fresh context for self-contained research or work.'}
 - \`webfetch\` and \`websearch\` give you internet access.
+- \`models\` searches the model catalog inside the turn (context window, cost) — use it before delegating to a subagent with a specific model or when the current provider fails.
 
 ${MODE_TEXT[mode] || `# Permission mode: ${mode}\nTool permission rules are enforced by the harness. Explicit deny rules always apply. Never work around a denied action.`}
 

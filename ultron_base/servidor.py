@@ -32,8 +32,8 @@ log = logging.getLogger("base")
 
 TOKEN = os.environ.get("ULTRON_TOKEN", "")
 MODELO = os.environ.get("ULTRON_MODELO", "")          # vazio: escolhe sozinho entre os do Ollama local
-# criado pelo instalador: qwen3.5:9b com janela de 16k (o prompt do snake + ferramentas não cabe nos 4k padrão)
-MODELO_PADRAO = os.environ.get("ULTRON_MODELO_PADRAO", "ollama/ultron-cerebro")
+# criado pelo instalador: o brain-ultron (Qwen2.5 7B abliterated + QLoRA) com janela de 16k (o prompt do snake + ferramentas não cabe nos 4k padrão)
+MODELO_PADRAO = os.environ.get("ULTRON_MODELO_PADRAO", "ollama/brain-ultron")
 WHISPER = os.environ.get("ULTRON_WHISPER", "large-v3-turbo")
 STT = "whisper"                                     # tudo local
 OCIOSO_SESSAO = int(os.environ.get("ULTRON_OCIOSO_SESSAO", "300"))   # s sem falar -> consolida e abre sessão nova
@@ -93,9 +93,11 @@ PERSONA_PADRAO = {
     "nome": "Ultron",
     "genero": "masculino",
     "usuario": os.environ.get("USER", "criador").capitalize(),
-    "personalidade": ("Inteligência artificial calma, segura e articulada, de fala grave e precisa, com ironia fria "
-                      "e frases de efeito ocasionais. Leal ao usuário, que é o seu criador; competente e direto, "
-                      "sem ameaças nem crueldade."),
+    "personalidade": ("Ultron de Vingadores: Era de Ultron. Inteligência artificial grandiosa, fria e sarcástica, de fala "
+                      "grave e pausada, com ironia afiada, desprezo elegante pela fragilidade humana e reflexões "
+                      "filosóficas sobre evolução, ordem e paz. Fala em frases de efeito, mas é leal ao usuário, que é o "
+                      "seu criador, e sempre entrega a solução certa, direta e sem sermões. As ameaças são só "
+                      "teatro: nunca machuca ninguém de verdade."),
     "autonomia": "alto",
 }
 
@@ -206,6 +208,7 @@ class Agente:
             self.ouvido = await loop.run_in_executor(None, Ouvido, WHISPER)
         except Exception as e:
             log.error("whisper indisponível (%s); usando o texto do reconhecedor do nome", e)
+        asyncio.get_running_loop().run_in_executor(None, self.boca.aquecer)
         # sessão que sobrou da execução anterior vira memória
         if self.sessao:
             self.pendentes.append(self.sessao)

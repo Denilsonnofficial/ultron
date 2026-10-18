@@ -10,7 +10,8 @@ import { estimateTokens } from '../agent/usage.js'
 import { EFFORTS, paths, readJSON, saveConfig, validateConfig, writeJSON, loadConfig } from '../config.js'
 import { diagnose } from '../doctor.js'
 import { McpManager } from '../mcp/client.js'
-import { bashOutput } from '../tools/bash.js'
+import { bashOutput, backgroundJobs } from '../tools/bash.js'
+import { toUnifiedPatch } from '../tools/diff.js'
 import { resolvePath } from '../tools/util.js'
 import { addSchedule, removeSchedule, schedules } from '../scheduler.js'
 import { setTheme, themes, t } from '../theme.js'
@@ -54,7 +55,15 @@ function diff(a, args = []) {
       const r = spawnSync('git', ['diff', '--no-ext-diff', last.git.before, last.git.after], { cwd: last.git.root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_DIR: repo.gitDir, GIT_WORK_TREE: last.git.root } })
       if (r.status === 0) return r.stdout
     }
-    return (last.files || []).map((f) => `--- ${f.path}\n${f.before ? Buffer.from(f.before.data, 'base64').toString() : ''}\n+++ ${f.path}\n${f.after ? Buffer.from(f.after.data, 'base64').toString() : ''}`).join('\n')
+    return (last.files || []).map((f) => {
+      const before = f.before ? Buffer.from(f.before.data, 'base64').toString('utf8') : ''
+      const after = f.after ? Buffer.from(f.after.data, 'base64').toString('utf8') : ''
+      try {
+        return toUnifiedPatch(f.path, before, after)
+      } catch {
+        return `--- ${f.path}\n${before}\n+++ ${f.path}\n${after}`
+      }
+    }).join('\n')
   }
 }
 async function side(a, prompt, system) {
@@ -228,8 +237,18 @@ export async function runAction(a, name, arg = '') {
       a.setMode('plan'); if (arg) return a.submitPrompt(arg); return
     }
     case 'bg': {
-      if (arg) { const result = await bashOutput.run({ id: arg }); return pager(a, `Job ${arg}`, result.output) }
-      a.showJobs(); return say(a, s.jobs.map((j) => `${j.id} · ${j.type} · ${j.status} · ${j.prompt.slice(0, 60)}`).join('\n') || 'Sem jobs de agentes.')
+      if (arg) {
+        const job = s.jobs.find((j) => j.id.startsWith(arg) || j.id === arg)
+        if (job && job.background) {
+          const sub = job.status === 'running' ? 'rodando em segundo plano' : `status ${job.status}${job.error ? ` (${job.error})` : ''}`
+          return pager(a, `Job ${job.id.slice(0, 8)}`, `${job.type} · ${sub}\nObjetivo: ${job.prompt}\nPara continuar a conversa: task com job_id="${job.id}".`)
+        }
+        const result = await bashOutput.run({ id: arg })
+        return pager(a, `Job ${arg}`, result.output)
+      }
+      const agentJobs = (s.jobs || []).filter((j) => j.background || j.status === 'running')
+      a.showJobs()
+      return say(a, agentJobs.map((j) => `${j.id.slice(0, 8)} · ${j.type} · ${j.status}${j.background ? ' · fundo' : ''} · ${String(j.prompt || '').slice(0, 60)}`).join('\n') || (backgroundJobs.size ? '' : 'Sem jobs de agentes.'))
     }
     case 'stop': { if (!arg) throw new Error('Use /stop <id>'); const result = await bashOutput.run({ id: arg, kill: true }); if (result.isError && a.agent.terminal?.has(arg)) return a.agent.terminal.stop(arg); return say(a, result.output) }
     case 'resume': {

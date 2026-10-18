@@ -17,6 +17,8 @@
     "logo": "node bin/snake.js logo",
     "assets": "node scripts/gerar-logo.mjs --png",
     "check": "node scripts/check.mjs",
+    "soak": "node scripts/soak.mjs",
+    "soak:smoke": "node scripts/soak.mjs --smoke",
     "github": "bash scripts/publicar-github.sh"
   },
   "files": [

@@ -15,8 +15,10 @@ import { checkModel, benchModel } from './providers/checks.js'
 import { diagnose } from './doctor.js'
 import { padEnd, strWidth, truncate } from './ui/ansi.js'
 import { fmtAgo, fmtCost, fmtTokens } from './ui/format.js'
+import { readJSON, writeJSON } from './config.js'
+import { resolvePath } from './tools/util.js'
 
-const SUBCOMMANDS = new Set(['models', 'providers', 'key', 'login', 'logout', 'sessions', 'logo', 'config', 'doctor', 'help', 'run', 'version', 'check-models', 'bench', 'serve', 'attach', 'acp', 'schedule'])
+const SUBCOMMANDS = new Set(['models', 'providers', 'key', 'login', 'logout', 'sessions', 'logo', 'config', 'doctor', 'help', 'run', 'version', 'check-models', 'bench', 'serve', 'attach', 'acp', 'schedule', 'mcp', 'stats', 'export', 'import'])
 
 export function parseArgv(argv) {
   const opts = { _: [] }
@@ -161,6 +163,10 @@ ${t.bold('Comandos')}
   snake serve [--port 8080]       servidor HTTP/SSE com token
   snake attach [url] [sessão]     conversa com o servidor
   snake acp                       protocolo ACP v1 por stdio
+  snake mcp                       servidores MCP: status, ferramentas, recursos e prompts
+  snake stats [--json]            consumo agregado por dia e modelo (histórico local)
+  snake export <id> [arquivo]     exporta a sessão (Markdown; --json exporta JSON)
+  snake import <arquivo>          importa uma sessão JSON exportada
   snake schedule                 lista agendamentos cron locais
 
 ${t.muted('Dentro da interface, digite /help para ver comandos e atalhos.')}
@@ -323,8 +329,12 @@ async function cmdKey(opts) {
   return 0
 }
 
-function cmdSessions() {
+function cmdSessions(opts) {
   const list = Session.list({ limit: 30 })
+  if (opts.json) {
+    console.log(JSON.stringify(list, null, 2))
+    return
+  }
   if (!list.length) return console.log(t.muted('Nenhuma sessão ainda.'))
   for (const s of list) {
     console.log(`${t.primary(s.id)}  ${t.muted(fmtAgo(s.updated).padEnd(14))} ${truncate(s.title || '', 50)}  ${t.muted(shortPath(s.cwd))} ${t.muted(fmtCost(s.cost || 0))}`)
@@ -332,8 +342,114 @@ function cmdSessions() {
   console.log(t.muted('\nRetome com: snake -r <id>   ou   snake -c (última deste diretório)'))
 }
 
-function cmdConfig(config) {
-  console.log(`${t.bold('Pasta do Snake')}   ${shortPath(paths.home)}`)
+async function cmdMcp(config, cwd, opts) {
+  const { McpManager } = await import('./mcp/client.js')
+  const op = opts._[1]
+  if (op && !['list', 'status', 'tools', 'resources', 'prompts'].includes(op)) {
+    console.error(t.error(`Uso: snake mcp [list|tools|resources|prompts] [--json]  (adicionar/remover: /mcp add|remove na interface)`))
+    return 2
+  }
+  const mgr = new McpManager(config.mcp, { cwd })
+  await mgr.startAll()
+  const live = mgr.clients.filter((c) => c.status === 'ok')
+  try {
+    if (opts.json) {
+      console.log(JSON.stringify(mgr.clients.map((c) => ({
+        name: c.name,
+        status: c.status,
+        error: c.error || null,
+        server: c.serverInfo,
+        tools: c.tools.map((tool) => tool.name),
+        resources: (c.resources || []).map((r) => r.uri),
+        templates: (c.templates || []).map((r) => r.uriTemplate),
+        prompts: (c.prompts || []).map((p) => p.name),
+      })), null, 2))
+      return 0
+    }
+    if (!mgr.size) {
+      console.log(t.muted('Nenhum servidor MCP configurado. Adicione na interface com /mcp add <nome> <comando...> ou <url>.'))
+      return 0
+    }
+    const mode = op || 'list'
+    for (const c of mgr.clients) {
+      const st = c.status === 'ok' ? t.primary('✓ conectado') : t.error(`✗ ${c.error || c.status}`)
+      console.log(`${t.bold(t.primary(c.name))} ${st}${c.serverInfo?.name ? t.muted(` · ${c.serverInfo.name}${c.serverInfo.version ? ` v${c.serverInfo.version}` : ''}`) : ''}`)
+      if (mode === 'list' || mode === 'status') {
+        console.log(t.muted(`  ferramentas: ${c.tools.length} · recursos: ${(c.resources || []).length} · prompts: ${(c.prompts || []).length}`))
+        if (c.status !== 'ok') continue
+      }
+      if ((mode === 'list' || mode === 'tools') && c.tools.length) {
+        for (const tool of c.tools.slice(0, 20)) console.log(`  ${t.accent(tool.name)}${t.muted(` — ${(tool.description || '').slice(0, 80)}`)}`)
+        if (c.tools.length > 20) console.log(t.muted(`  … +${c.tools.length - 20} ferramentas`))
+      }
+      if ((mode === 'list' || mode === 'resources') && ((c.resources || []).length || (c.templates || []).length)) {
+        for (const r of [...(c.resources || []), ...(c.templates || []).map((x) => ({ uri: x.uriTemplate, name: `${x.name || ''} [template]` }))].slice(0, 20)) console.log(`  ${t.info(r.uri)}${t.muted(` — ${r.name || ''}`)}`)
+      }
+      if ((mode === 'list' || mode === 'prompts') && (c.prompts || []).length) {
+        for (const p of c.prompts.slice(0, 20)) console.log(`  ${t.text(p.name)}${t.muted(` — ${p.description || ''}`)}`)
+      }
+    }
+    if (!live.length) return 1
+    return 0
+  } finally {
+    mgr.closeAll()
+  }
+}
+
+/** Consumo agregado por dia e modelo a partir do histórico local (~/.snake/history.jsonl). */
+function cmdStats(opts) {
+  const groups = new Map()
+  let history = ''
+  try { history = fs.readFileSync(paths.history, 'utf8') } catch {}
+  for (const line of history.split('\n')) {
+    let e
+    try { e = JSON.parse(line) } catch { continue }
+    if (e.type !== 'usage') continue
+    const key = `${new Date(e.at).toISOString().slice(0, 10)} ${e.model}`
+    const row = groups.get(key) || { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, apiMs: 0, unknown: false }
+    for (const k of Object.keys(row)) if (k !== 'unknown') row[k] += e[k] || 0
+    row.unknown ||= !!e.costUnknown
+    groups.set(key, row)
+  }
+  if (opts.json) {
+    console.log(JSON.stringify([...groups].map(([k, v]) => ({ day: k.slice(0, 10), model: k.slice(11), ...v })), null, 2))
+    return 0
+  }
+  const text = [...groups].map(([k, v]) => `${k}\n${v.requests} requests · ↑${fmtTokens(v.input)} ↓${fmtTokens(v.output)} · cache ${fmtTokens(v.cacheRead)}/${fmtTokens(v.cacheWrite)} · ${fmtCost(v.cost, { unknown: v.unknown })} · ${(v.apiMs / 1000).toFixed(1)}s`).join('\n\n')
+  console.log(text || t.muted('Sem requisições registradas nesta versão.'))
+  return 0
+}
+
+function cmdExport(opts, cwd) {
+  const id = opts._[1]
+  if (!id) { console.error(t.error('Uso: snake export <id-da-sessão> [arquivo] [--json]')); return 2 }
+  const s = Session.resolve(id)
+  if (!s) { console.error(t.error(`Sessão não encontrada: ${id}`)); return 1 }
+  const asJson = opts.json || opts._[2] === 'json' || (opts._[2] || '').endsWith('.json')
+  const file = resolvePath(cwd, opts._[2] && opts._[2] !== 'json' ? opts._[2] : `snake-${s.id}.${asJson ? 'json' : 'md'}`)
+  if (asJson) writeJSON(file, { format: 'snake-session', version: 2, ...s.toJSON() }, 0o600)
+  else {
+    const lines = [`# ${s.title || 'Sessão Snake'}`, '', `- Sessão: ${s.id}`, `- Modelo: ${s.model}`, `- Exportado em: ${new Date().toISOString()}`, '']
+    for (const m of s.messages) lines.push(`## ${m.role}`, '', m.content || '', '')
+    fs.writeFileSync(file, lines.join('\n'), { mode: 0o600 })
+  }
+  console.log(`Exportado: ${file}`)
+  return 0
+}
+
+function cmdImport(opts, cwd) {
+  const file = opts._[1]
+  if (!file) { console.error(t.error('Uso: snake import <arquivo.json>')); return 2 }
+  let data
+  try { data = JSON.parse(fs.readFileSync(resolvePath(cwd, file), 'utf8')) } catch (e) { console.error(t.error(`Não foi possível ler: ${e.message}`)); return 1 }
+  try {
+    const s = Session.import(data, cwd)
+    console.log(`Sessão importada: ${s.id}`)
+    return 0
+  } catch (e) { console.error(t.error(e.message)); return 1 }
+}
+
+function cmdConfig(config) {  console.log(`${t.bold('Pasta do Snake')}   ${shortPath(paths.home)}`)
   console.log(`${t.bold('Configuração')}     ${shortPath(paths.config)}${config._projectFile ? t.muted('  + projeto: ' + shortPath(config._projectFile)) : ''}`)
   console.log(`${t.bold('Chaves')}           ${shortPath(paths.auth)}`)
   console.log(`${t.bold('Sessões')}          ${shortPath(paths.sessions)}`)
@@ -472,8 +588,16 @@ export async function main(argv) {
       return 0
     }
     case 'sessions':
-      cmdSessions()
+      cmdSessions(opts)
       return 0
+    case 'mcp':
+      return cmdMcp(config, cwd, opts)
+    case 'stats':
+      return cmdStats(opts)
+    case 'export':
+      return cmdExport(opts, cwd)
+    case 'import':
+      return cmdImport(opts, cwd)
     case 'config':
       cmdConfig(config)
       return 0

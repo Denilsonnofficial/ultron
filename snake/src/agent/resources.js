@@ -45,7 +45,7 @@ export function discoverSkills(cwd) {
 export const BUILTIN_AGENTS = [
   { name: 'build', description: 'Implementação e testes', mode: 'primary', color: 'green' },
   { name: 'plan', description: 'Investigar e planejar sem alterar arquivos', mode: 'both', permission: 'plan' },
-  { name: 'explore', description: 'Busca e leitura do projeto', mode: 'both', permission: 'plan', tools: ['read', 'glob', 'grep', 'ls', 'skill', 'lsp-definition', 'lsp-references', 'lsp-hover', 'lsp-symbols'] },
+  { name: 'explore', description: 'Busca e leitura do projeto', mode: 'both', permission: 'plan', tools: ['read', 'glob', 'grep', 'ls', 'skill', 'models', 'lsp-definition', 'lsp-references', 'lsp-hover', 'lsp-symbols'] },
   { name: 'general', description: 'Tarefa independente completa', mode: 'both' },
 ]
 const entries = (dir) => { try { return fs.readdirSync(dir).sort() } catch { return [] } }

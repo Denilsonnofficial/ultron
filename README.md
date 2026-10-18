@@ -6,7 +6,7 @@ por voz e controla o computador, sem mandar nada para a internet. Fork do
 com o cérebro, a transcrição e a voz rodando na própria máquina, e o harness **snake** (embutido)
 no lugar do opencode.
 
-Estado: **1.0.0**. Feito e medido numa RTX 3060 12 GB + Xeon E5-2680 v3 + 32 GB.
+Estado: **1.1.0** (cérebro `brain-ultron`, voz XTTS-v2, gadget plasma, snake atualizado). Feito e medido numa RTX 3060 12 GB + Xeon E5-2680 v3 + 32 GB.
 
 ## Instalar
 
@@ -21,9 +21,11 @@ O instalador (usuário comum; sudo só para pacotes do sistema e para instalar o
 
 1. Confere a GPU NVIDIA e instala o que faltar: Node.js 20+ (para o snake), PortAudio, utilitários
    do PulseAudio/PipeWire, libnotify, Qt.
-2. Instala o **Ollama** se não houver, baixa o **Qwen3.5 9B** (6,6 GB) e cria o `ultron-cerebro`
-   (o mesmo modelo com janela de 16 mil tokens: o prompt do snake + ferramentas não cabe nos 4 mil
-   padrão do Ollama; os pesos não são duplicados).
+2. Instala o **Ollama** se não houver e registra o cérebro **`brain-ultron`** (Qwen2.5 7B abliterated + QLoRA
+   com a persona do Ultron de *Era de Ultron* e tool calling; janela de 16 mil tokens). O GGUF (4,7 GB) é baixado da
+   [release `brain-ultron-v1`](https://github.com/Denilsonnofficial/ultron/releases/tag/brain-ultron-v1) em 3 partes e
+   conferido por SHA256. Para usar um arquivo seu: `BRAIN_ULTRON_GGUF=/caminho/modelo.gguf ./instalar.sh`. Sem o
+   brain-ultron, cai para o Qwen3.5 9B. Como foi treinado: pasta `brain-ultron/`.
 3. Ambiente Python próprio em `~/.local/share/ultron/venv` com faster-whisper + CUDA (cuBLAS/cuDNN
    do pip, não precisa do CUDA do sistema), Kokoro (onnx), Vosk, PySide6.
 4. Baixa a voz Kokoro (350 MB), o reconhecedor do nome (Vosk, 31 MB) e o Whisper large-v3-turbo.
@@ -43,7 +45,7 @@ gadget (holograma) ◄── Kokoro pm_alex/pf_dora (CPU) ◄── frases ◄�
 |---|---|---|
 | Modelo | Qwen3.5 9B (`reasoning_effort: none`) | 1ª palavra em 0,15 s; resposta curta em 1,8 s; com ferramenta (bash) ~10 s pelo snake; ~6 GB de VRAM |
 | Transcrição | faster-whisper large-v3-turbo int8 na GPU | 6 s de fala em 0,33 s; ~0,8 GB de VRAM; acertou até "Ultron" |
-| Voz | Kokoro-82M onnx, vozes pt-BR pm_alex (padrão), pm_santa, pf_dora | ~4x mais rápido que o tempo real na CPU |
+| Voz | **XTTS-v2** na GPU (padrão, ~2 GB de VRAM, voz `Damien Black`; troque com `ULTRON_VOZ_MASCULINA`), Kokoro-82M como reserva (`ULTRON_VOZ=kokoro`) | XTTS ~2x mais rápido que o tempo real |
 | Harness | snake (embutido em `snake/`) | passou no `check-models` com o Qwen |
 
 Escolhas e porquês:
@@ -79,9 +81,11 @@ ultron texto "..."   pergunta digitada
 
 ## Gadget
 
+Tema **Ultron (plasma)**: a forma do Ultron nascendo no filme, uma esfera de plasma azul com a casca de energia
+amassada, filamentos que acendem como uma rede neural, fagulhas e núcleo que pulsa com a voz (vermelha ao pensar).
 Tema padrão **Ultron (holograma)**: cabeça angular em malha de baixo polígono, azul, com olhos em
 fenda que brilham com a voz, boca que abre ao falar, linhas de varredura, cintilação, falhas de
-sinal e partículas; fica vermelho quando está pensando. Também traz os temas do Jarvis e do C3PO.
+sinal e partículas; fica vermelho quando está pensando. Traz também todos os temas do Jarvis e do C3PO (18 no total).
 Desenhado à mão em Qt (nenhuma imagem do filme).
 
 ## Memória e agentes

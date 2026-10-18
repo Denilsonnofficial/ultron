@@ -88,3 +88,33 @@ export function diffLines(oldText, newText, { context = 3, maxLines = 400 } = {}
   }
   return { added, removed, lines }
 }
+
+/**
+ * Exporta o diff no formato unificado (---/+++/@@), útil para /diff fora do git,
+ * revisões e ferramentas externas. Implementação própria sobre diffLines.
+ */
+export function toUnifiedPatch(rel, oldText, newText, { context = 3 } = {}) {
+  const d = diffLines(oldText, newText, { context, maxLines: Number.MAX_SAFE_INTEGER })
+  const out = [`--- a/${rel}`, `+++ b/${rel}`]
+  let oldNo = 0
+  let newNo = 0
+  let hunk = null
+  const flush = () => {
+    if (!hunk) return
+    const oldCount = hunk.oldEnd - hunk.oldStart
+    const newCount = hunk.newEnd - hunk.newStart
+    out.push(`@@ -${hunk.oldStart + 1},${oldCount} +${hunk.newStart + 1},${newCount} @@`)
+    out.push(...hunk.body)
+    hunk = null
+  }
+  const push = (line) => {
+    if (!hunk) hunk = { oldStart: oldNo, newStart: newNo, oldEnd: oldNo, newEnd: newNo, body: [] }
+    if (line.type === 'gap') { flush(); return }
+    if (line.type === 'ctx') { oldNo = line.oldNo; newNo = line.newNo; hunk.oldEnd = oldNo; hunk.newEnd = newNo; hunk.body.push(' ' + line.text); return }
+    if (line.type === 'del') { oldNo = line.oldNo; hunk.oldEnd = oldNo; hunk.body.push('-' + line.text); return }
+    newNo = line.newNo; hunk.newEnd = newNo; hunk.body.push('+' + line.text)
+  }
+  for (const line of d.lines) push(line)
+  flush()
+  return out.join('\n')
+}

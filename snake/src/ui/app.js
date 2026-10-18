@@ -169,7 +169,7 @@ export class App {
       session,
       config: this.config,
       catalog: this.catalog,
-      extraTools: this.mcp ? this.mcp.tools() : [],
+      extraTools: this.mcp ? this.mcp.agentTools() : [],
       ui: {
         emit: (type, data) => this.onAgentEvent(type, data),
         askPermission: (req) => this.askPermission(req),
@@ -998,17 +998,18 @@ export class App {
     this.interactionQueue = promise.catch(() => {})
     return promise
   }
-  askQuestionNow({ question, options = [], signal }) {
+  askQuestionNow({ question, header, options = [], signal }) {
     return new Promise((resolve) => {
       this.finishText()
       let finished = false
       const done = (value) => { if (finished) return; finished = true; signal?.removeEventListener('abort', abort); this.modal = null; resolve(value); this.render() }
       const abort = () => done(null)
-      const free = () => { this.modal = new Prompt({ title: question, label: 'Resposta:', onSubmit: done, onCancel: () => done(null) }); this.render() }
+      const title = header ? `${header}: ${question}` : question
+      const free = () => { this.modal = new Prompt({ title, label: 'Resposta:', onSubmit: done, onCancel: () => done(null) }); this.render() }
       signal?.addEventListener('abort', abort, { once: true })
       if (signal?.aborted) return done(null)
       if (!options.length) return free()
-      this.modal = new Picker({ title: question, filterable: false, maxVisible: this.cols < 60 ? 3 : 8, items: [...options.map((v) => ({ label: v, value: v })), { label: 'Escrever outra resposta', value: null }], onSelect: (it) => it.value === null ? free() : done(it.value), onCancel: () => done(null) })
+      this.modal = new Picker({ title, filterable: false, maxVisible: this.cols < 60 ? 3 : 8, items: [...options.map((v) => ({ label: v, value: v })), { label: 'Escrever outra resposta', value: null }], onSelect: (it) => it.value === null ? free() : done(it.value), onCancel: () => done(null) })
       this.render()
     })
   }
@@ -1952,18 +1953,27 @@ Investigue os arquivos de manifesto, README e a estrutura antes de escrever. Nã
     }
     for (const c of this.mcp.clients) {
       const st = c.status === 'ok' ? t.primary('✓ conectado') : c.status === 'conectando' ? t.warn('… conectando') : t.error('✗ ' + (c.error || c.status))
-      lines.push(`  ${t.accent(c.name)} ${st} ${t.muted(`· ${c.tools.length} ferramentas`)}`)
+      const extra = c.status === 'ok' ? t.muted(` · ${(c.resources || []).length} recursos · ${(c.prompts || []).length} prompts`) : ''
+      lines.push(`  ${t.accent(c.name)} ${st} ${t.muted(`· ${c.tools.length} ferramentas`)}${extra}`)
       for (const tool of c.tools.slice(0, 12)) lines.push(t.subtle(`     ${tool.name}`) + t.muted(` — ${truncate(tool.description || '', this.cols - 30)}`))
+      for (const r of [...(c.resources || []), ...(c.templates || []).map((x) => ({ uri: x.uriTemplate, name: `${x.name || ''} [template]` }))].slice(0, 6)) lines.push(t.subtle(`     ${r.uri}`) + t.muted(` — ${truncate(r.name || 'recurso', this.cols - 30)}`))
+      for (const p of (c.prompts || []).slice(0, 6)) lines.push(t.subtle(`     /${p.name}`) + t.muted(` — ${truncate(p.description || 'prompt', this.cols - 30)}`))
     }
     this.block(lines)
   }
 
   showJobs() {
-    if (!backgroundJobs.size) return this.block(t.muted('Nenhum processo em segundo plano.'))
-    this.block([
-      t.bold(t.primary('Processos em segundo plano')),
-      ...[...backgroundJobs.values()].map((j) => `  ${t.accent(j.id)} ${t.muted(`pid ${j.pid}`)} ${j.exitCode === null ? t.primary('rodando') : t.muted(`saiu (${j.exitCode})`)} ${t.text(truncate(j.command, this.cols - 30))}`),
-    ])
+    const agentJobs = (this.session.jobs || []).filter((j) => j.background || j.status === 'running')
+    if (!backgroundJobs.size && !agentJobs.length) return this.block(t.muted('Nenhum processo em segundo plano.'))
+    const lines = [t.bold(t.primary('Processos em segundo plano'))]
+    for (const j of [...backgroundJobs.values()]) {
+      lines.push(`  ${t.accent(j.id)} ${t.muted(`pid ${j.pid}`)} ${j.exitCode === null ? t.primary('rodando') : t.muted(`saiu (${j.exitCode})`)} ${t.text(truncate(j.command, this.cols - 30))}`)
+    }
+    for (const j of agentJobs) {
+      const st = j.status === 'running' ? t.primary('rodando') : j.status === 'done' ? t.accent('pronto') : t.error(j.status)
+      lines.push(`  ${t.accent(j.id.slice(0, 8))} ${t.muted('subagente')} ${st} ${t.text(truncate(`${j.type}: ${j.prompt || ''}`, this.cols - 30))}`)
+    }
+    this.block(lines)
   }
 
   showStatus() {
@@ -2036,7 +2046,7 @@ Investigue os arquivos de manifesto, README e a estrutura antes de escrever. Nã
     this.catalog.refreshStale().then(() => this.render())
     if (this.mcp.size) {
       this.mcp.startAll().then(() => {
-        this.agent.extraTools = this.mcp.tools()
+        this.agent.extraTools = this.mcp.agentTools()
         const ok = this.mcp.clients.filter((c) => c.status === 'ok')
         const bad = this.mcp.clients.filter((c) => c.status !== 'ok')
         if (ok.length) this.block(t.primary('✓ ') + t.muted(`MCP: ${ok.map((c) => `${c.name} (${c.tools.length})`).join(', ')}`))

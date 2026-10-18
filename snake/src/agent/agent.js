@@ -16,6 +16,7 @@ import { TerminalManager } from '../tools/pty.js'
 import { DEFAULT_CONTEXT } from '../providers/catalog.js'
 import { isAbortError, streamWithRetry } from '../providers/index.js'
 import { findTool, getTools } from '../tools/index.js'
+import { modelsTool } from '../tools/models.js'
 import { buildSystemPrompt, findInstructionFiles } from './prompt.js'
 import { Session } from './session.js'
 import { estimateMessagesTokens, estimateTokens } from './usage.js'
@@ -186,7 +187,7 @@ export class Agent {
 
   tools() {
     const definition = this.agentDefinition()
-    const tools = getTools({ mode: definition.permission === 'plan' ? 'plan' : this.mode, disabled: this.config.disabledTools || [], extra: [...this.extraTools, ...this.extensions.tools, ...(this.lsp?.tools() || []), ...(this.terminal?.tools() || [])], subagent: this.subagent })
+    const tools = getTools({ mode: definition.permission === 'plan' ? 'plan' : this.mode, disabled: this.config.disabledTools || [], extra: [modelsTool(this.catalog), ...this.extraTools, ...this.extensions.tools, ...(this.lsp?.tools() || []), ...(this.terminal?.tools() || [])], subagent: this.subagent })
     return tools.filter((t) => !definition.tools || (Array.isArray(definition.tools) ? definition.tools.includes(t.name) : definition.tools[t.name] !== false))
   }
 
@@ -345,6 +346,7 @@ export class Agent {
   }
 
   async runSubagent(args, signal, call) {
+    if (args?.background) return this.runChildBackground(args, signal, call)
     if (this.activeJobs >= (this.config.maxParallelSubagents || 3)) await new Promise((resolve, reject) => {
       const abort = () => { const i = this.jobWaiters.indexOf(ready); if (i >= 0) this.jobWaiters.splice(i, 1); reject(abortError()) }
       const ready = () => { signal?.removeEventListener('abort', abort); resolve() }
@@ -357,13 +359,86 @@ export class Agent {
     finally { this.activeJobs--; this.jobWaiters.shift()?.() }
   }
 
+  /**
+   * Subagente em segundo plano: registra o job e devolve de imediato; quando termina,
+   * o agente pai recebe um aviso sintético com o relatório (sem polling).
+   */
+  async runChildBackground(args, signal, call) {
+    const prompt = String(args.prompt || args.description)
+    const definition = discoverAgents(this.session.cwd).find((a) => a.name === (args.subagent_type || 'general') && a.mode !== 'primary')
+    if (!definition) throw new Error(`Tipo de subagente desconhecido: ${args.subagent_type}`)
+    let job = args.job_id && this.session.jobs.find((j) => j.id === args.job_id)
+    if (args.job_id && !job) throw new Error('Job não encontrado nesta sessão')
+    const model = this.resolveSubagentModel(args.model, definition)
+    const session = (job && Session.load(job.sessionId)) || Session.create({ cwd: this.session.cwd, model, ephemeral: this.session.ephemeral })
+    session.parentId = this.session.id
+    session.agent = definition.name
+    job ||= { id: crypto.randomUUID(), sessionId: session.id, parentMessageId: call?.id, type: definition.name, prompt, created: Date.now(), status: 'queued' }
+    if (!this.session.jobs.includes(job)) this.session.jobs.push(job)
+    job.status = 'running'; job.background = true; this.session.save()
+    this.emit('sub-job-start', { job })
+    // Roda sem bloquear o turno do pai; o aviso chega via notify() -> takeNotes().
+    const config = { ...this.config, agent: definition.name, snapshots: false, permissions: deepMerge(this.config.permissions, typeof definition.permission === 'object' ? definition.permission : {}) }
+    const sub = new Agent({
+      session,
+      config,
+      catalog: this.catalog,
+      extraTools: this.extraTools,
+      subagent: true,
+      ui: {
+        emit: (type, data) => this.emit('sub', { parent: call, type, data }),
+        askPermission: this.ui.askPermission,
+        recordUsage: (ref, usage, options) => this.recordUsage(ref, usage, options),
+      },
+    })
+    sub.mode = this.mode === 'plan' || definition.permission === 'plan' ? 'plan' : this.mode
+    sub.alwaysAllow = this.alwaysAllow
+    const bgController = new AbortController()
+    if (signal) {
+      if (signal.aborted) bgController.abort()
+      else signal.addEventListener('abort', () => bgController.abort(), { once: true })
+    }
+    const bgSignal = bgController.signal
+    void (async () => {
+      try {
+        await sub.run(prompt, { signal: bgSignal })
+        job.status = 'done'
+      } catch (e) {
+        if (isAbortError(e) || bgSignal.aborted) { job.status = 'failed'; job.error = 'interrompido' }
+        else { job.status = 'failed'; job.error = e.message }
+      } finally {
+        job.finished = Date.now(); session.save(); this.session.save(); this.emit('sub-job-end', { job }); await sub.close()
+        const last = [...session.messages].reverse().find((m) => m.role === 'assistant' && m.content)
+        const short = job.id.slice(0, 8)
+        this.notify(`[aviso automático do harness] O subagente em segundo plano ${definition.name} (${short}) terminou com status ${job.status}.\n${truncateMiddle(last?.content || '(sem relatório)', 4000)}\nUse task com job_id="${job.id}" para continuar essa conversa.`)
+      }
+    })()
+    return {
+      output: `O subagente ${definition.name} está trabalhando em segundo plano (job ${job.id.slice(0, 8)}). Você será avisado automaticamente quando ele terminar — não fique consultando em loop; continue o trabalho que não depende dele ou encerre a resposta.`,
+      display: { summary: `${definition.name} · segundo plano · ${job.id.slice(0, 8)}` },
+    }
+  }
+
+  /** Modelo do subagente: explícito no parâmetro, do tipo de agente, ou o atual. */
+  resolveSubagentModel(ref, definition) {
+    if (ref) {
+      const slash = String(ref).indexOf('/')
+      const provider = slash > 0 ? String(ref).slice(0, slash) : null
+      if (!provider) throw new Error(`Modelo inválido: ${ref}. Use "provedor/modelo".`)
+      const found = this.catalog.find(ref)
+      if (!found || found.unknown) throw new Error(`Modelo não encontrado no catálogo: ${ref}. Use a ferramenta models para listar.`)
+      return `${found.provider}/${found.id}`
+    }
+    return definition.model || this.session.model
+  }
+
   async runChild(args, signal, call) {
     const prompt = String(args.prompt || args.description)
     const definition = discoverAgents(this.session.cwd).find((a) => a.name === (args.subagent_type || 'general') && a.mode !== 'primary')
     if (!definition) throw new Error(`Tipo de subagente desconhecido: ${args.subagent_type}`)
     let job = args.job_id && this.session.jobs.find((j) => j.id === args.job_id)
     if (args.job_id && !job) throw new Error('Job não encontrado nesta sessão')
-    const session = (job && Session.load(job.sessionId)) || Session.create({ cwd: this.session.cwd, model: definition.model || this.session.model, ephemeral: this.session.ephemeral })
+    const session = (job && Session.load(job.sessionId)) || Session.create({ cwd: this.session.cwd, model: this.resolveSubagentModel(args.model, definition), ephemeral: this.session.ephemeral })
     session.parentId = this.session.id
     session.agent = definition.name
     job ||= { id: crypto.randomUUID(), sessionId: session.id, parentMessageId: call?.id, type: definition.name, prompt, created: Date.now(), status: 'queued' }
@@ -647,7 +722,7 @@ ${transcript}
           }
           return { role: 'tool', toolCallId: call.id, name: call.name, content: output, isError: !!result.isError }
         }
-        // Chamadas consecutivas somente leitura (read, grep, glob, webfetch, subagentes explore/plan…) rodam em
+        // Chamadas consecutivas somente leitura (read, grep, glob, webfetch, models, subagentes explore/plan…) rodam em
         // paralelo; qualquer coisa que altere estado roda sozinha e em ordem.
         const available = this.tools()
         const parallel = (call) => {

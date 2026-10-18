@@ -14,19 +14,21 @@ export const task = {
   label: 'Task',
   readOnly: false,
   description:
-    'Launch a sub-agent with a fresh, separate context to handle a self-contained task (e.g. researching how something works across the codebase, finding where a feature is implemented, or an isolated multi-step change). It has the same tools (except task/todowrite) and returns a final report. It does NOT see this conversation, so give it a complete, detailed prompt.',
+    'Launch a sub-agent with a fresh, separate context to handle a self-contained task (e.g. researching how something works across the codebase, finding where a feature is implemented, or an isolated multi-step change). It has the same tools (except task/todowrite) and returns a final report. It does NOT see this conversation, so give it a complete, detailed prompt. Pass model ("provider/model") only to use a different model; background:true launches it asynchronously and notifies you when it finishes (do not poll).',
   parameters: {
     type: 'object',
     properties: {
       description: { type: 'string', description: 'Short description of the task (3-6 words)' },
       prompt: { type: 'string', description: 'Complete instructions for the sub-agent' },
       subagent_type: { type: 'string', description: 'Agent type, e.g. explore, plan or general' },
+      model: { type: 'string', description: 'Model for the subagent as "provider/model". Omit to inherit the current model.' },
+      background: { type: 'boolean', description: 'Run in background and return immediately; you are notified automatically when it finishes.' },
       job_id: { type: 'string', description: 'Resume an existing child job' },
     },
     required: ['description', 'prompt'],
   },
   summary(args) {
-    return String(args?.description || '')
+    return String(args?.description || '') + (args?.background ? ' (segundo plano)' : '')
   },
   async run(args, ctx) {
     if (!ctx.runSubagent) return { output: 'Erro: subagentes indisponíveis neste contexto.', isError: true }

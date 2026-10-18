@@ -123,6 +123,21 @@ export function resultToText(res) {
   return parts.join('\n') || '(sem conteúdo)'
 }
 
+/** Converte o resultado de resources/read ou prompts/get em texto legível. */
+export function resourceContentsToText(payload) {
+  const parts = []
+  const items = payload?.contents || payload?.messages || []
+  for (const c of items) {
+    if (typeof c === 'string') parts.push(c)
+    else if (c.type === 'text' && c.text) parts.push(c.text)
+    else if (c.text) parts.push(c.text)
+    else if (c.blob) parts.push(`[binário ${c.mimeType || ''}: ${c.uri || ''}]`)
+    else if (c.content?.text) parts.push(c.content.text)
+    else parts.push(JSON.stringify(c))
+  }
+  return parts.join('\n\n') || '(sem conteúdo)'
+}
+
 export class McpClient {
   constructor(name, cfg, { cwd = process.cwd() } = {}) {
     this.name = name
@@ -131,6 +146,9 @@ export class McpClient {
     this.pending = new Map()
     this.nextId = 1
     this.tools = []
+    this.resources = []
+    this.templates = []
+    this.prompts = []
     this.status = 'parado'
     this.error = ''
     this.serverInfo = null
@@ -217,6 +235,8 @@ export class McpClient {
       this.serverInfo = init?.serverInfo || null
       this.notify('notifications/initialized')
       await this.listTools()
+      await this.listResources()
+      await this.listPrompts()
       this.status = 'ok'
     } catch (err) {
       this.status = 'erro'
@@ -236,6 +256,51 @@ export class McpClient {
     } while (cursor)
     this.tools = tools
     return tools
+  }
+
+  /** Recursos (documents/records) e prompts são opcionais no protocolo: falha vira lista vazia. */
+  async listResources() {
+    try {
+      const resources = []
+      const templates = []
+      let cursor
+      do {
+        const res = await this.request('resources/list', cursor ? { cursor } : {}, { timeout: 15000 })
+        resources.push(...(res?.resources || []))
+        templates.push(...(res?.resourceTemplates || []))
+        cursor = res?.nextCursor
+      } while (cursor)
+      this.resources = resources
+      this.templates = templates
+    } catch {
+      this.resources = []
+      this.templates = []
+    }
+    return { resources: this.resources, templates: this.templates }
+  }
+
+  async readResource(uri) {
+    return this.request('resources/read', { uri }, { timeout: this.cfg.toolTimeout || 300000 })
+  }
+
+  async listPrompts() {
+    try {
+      const prompts = []
+      let cursor
+      do {
+        const res = await this.request('prompts/list', cursor ? { cursor } : {}, { timeout: 15000 })
+        prompts.push(...(res?.prompts || []))
+        cursor = res?.nextCursor
+      } while (cursor)
+      this.prompts = prompts
+    } catch {
+      this.prompts = []
+    }
+    return this.prompts
+  }
+
+  async getPrompt(name, args) {
+    return this.request('prompts/get', { name, arguments: args || {} }, { timeout: 60000 })
   }
 
   async callTool(name, args, { signal } = {}) {
@@ -293,6 +358,101 @@ export class McpManager {
 
   tools() {
     return this.clients.filter((c) => c.status === 'ok').flatMap((c) => c.agentTools())
+  }
+
+  /**
+   * Ferramentas do agente vindas do MCP: ferramentas dos servidores + recursos/prompts.
+   * `tools()` mantém o contrato original (só ferramentas do servidor); este método soma
+   * os recursos/prompts para os 4 pontos que montam o agente (interface, runner, headless, ACP).
+   */
+  agentTools() {
+    const live = this.clients.filter((c) => c.status === 'ok')
+    return [...live.flatMap((c) => c.agentTools()), ...this.resourceTools(live)]
+  }
+
+  /**
+   * Ferramentas de recursos e prompts MCP (documentos, registros e templates dos servidores).
+   * Ideia presente em harnesses maduros: ler o que não é arquivo local via URI do servidor.
+   */
+  resourceTools(live = this.clients.filter((c) => c.status === 'ok')) {
+    const byName = (name) => live.find((c) => c.name === name)
+    return [
+      {
+        name: 'list_mcp_resources',
+        label: 'MCPResources',
+        readOnly: true,
+        mcp: true,
+        description: 'List documents, records and other data exposed by MCP servers (URIs that are not local files). Use read_mcp_resource afterwards to load one.',
+        parameters: { type: 'object', properties: { server: { type: 'string', description: 'MCP server name. Omit to list every server.' } } },
+        summary: (a) => a?.server || 'todos os servidores',
+        run: async (args) => {
+          const targets = args?.server ? [byName(args.server)].filter(Boolean) : live
+          if (args?.server && !targets.length) return { output: `Servidor MCP não encontrado: ${args.server}`, isError: true }
+          const rows = []
+          for (const c of targets) {
+            for (const r of c.resources || []) rows.push(`${c.name}\t${r.uri}\t${r.name || ''}${r.mimeType ? ` (${r.mimeType})` : ''}`)
+            for (const t of c.templates || []) rows.push(`${c.name}\t${t.uriTemplate}\t[template] ${t.name || ''}`)
+          }
+          return { output: rows.length ? rows.join('\n') : 'Nenhum recurso MCP exposto.', display: { summary: `${rows.length} recurso(s)` } }
+        },
+      },
+      {
+        name: 'read_mcp_resource',
+        label: 'MCPResource',
+        readOnly: true,
+        mcp: true,
+        description: 'Read one MCP resource by server and URI (not for local files; use read for those). Returns the full content.',
+        parameters: { type: 'object', properties: { server: { type: 'string' }, uri: { type: 'string' } }, required: ['server', 'uri'] },
+        summary: (a) => `${a?.server || ''}:${a?.uri || ''}`,
+        run: async (args, ctx) => {
+          const c = byName(args?.server)
+          if (!c) return { output: `Servidor MCP não encontrado: ${args?.server}`, isError: true }
+          if (!args?.uri) return { output: 'Parâmetro "uri" é obrigatório.', isError: true }
+          try {
+            const payload = await c.readResource(args.uri)
+            const text = resourceContentsToText(payload)
+            return { output: text.length > 50000 ? text.slice(0, 50000) + '\n…[truncado]' : text, display: { summary: `${c.name}:${args.uri}` } }
+          } catch (e) {
+            if (ctx?.signal?.aborted) return { output: 'Leitura interrompida.', isError: true }
+            return { output: `Erro MCP: ${e.message}`, isError: true }
+          }
+        },
+      },
+      {
+        name: 'list_mcp_prompts',
+        label: 'MCPPrompts',
+        readOnly: true,
+        mcp: true,
+        description: 'List prompt templates offered by MCP servers.',
+        parameters: { type: 'object', properties: { server: { type: 'string' } } },
+        summary: (a) => a?.server || 'todos os servidores',
+        run: async (args) => {
+          const targets = args?.server ? [byName(args.server)].filter(Boolean) : live
+          const rows = []
+          for (const c of targets) for (const p of c.prompts || []) rows.push(`${c.name}\t${p.name}\t${p.description || ''}`)
+          return { output: rows.length ? rows.join('\n') : 'Nenhum prompt MCP exposto.', display: { summary: `${rows.length} prompt(s)` } }
+        },
+      },
+      {
+        name: 'get_mcp_prompt',
+        label: 'MCPPrompt',
+        readOnly: true,
+        mcp: true,
+        description: 'Render an MCP prompt template by server and name with its arguments.',
+        parameters: { type: 'object', properties: { server: { type: 'string' }, name: { type: 'string' }, arguments: { type: 'object' } }, required: ['server', 'name'] },
+        summary: (a) => `${a?.server || ''}:${a?.name || ''}`,
+        run: async (args) => {
+          const c = byName(args?.server)
+          if (!c) return { output: `Servidor MCP não encontrado: ${args?.server}`, isError: true }
+          try {
+            const payload = await c.getPrompt(args.name, args.arguments)
+            return { output: resourceContentsToText(payload) }
+          } catch (e) {
+            return { output: `Erro MCP: ${e.message}`, isError: true }
+          }
+        },
+      },
+    ]
   }
 
   closeAll() {

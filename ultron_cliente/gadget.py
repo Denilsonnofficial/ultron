@@ -1,5 +1,6 @@
 """Gadget flutuante: esfera com ondas sonoras e quatro botões (microfone, tema, volume e base)."""
 import math
+import random
 import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
@@ -38,6 +39,30 @@ def _paleta(ocioso, conversa, ouvindo, falando, pensando, agindo):
             "pensando": pensando, "agindo": agindo}
 
 
+def _malha_plasma(n=46, semente=7):
+    """Casca amassada de energia (pontos numa esfera deformados) ligada aos vizinhos mais próximos."""
+    rnd = random.Random(semente)
+    pts = []
+    for i in range(n):
+        y = 1 - 2 * (i + 0.5) / n
+        r = math.sqrt(max(0.0, 1 - y * y))
+        ang = i * math.pi * (3 - math.sqrt(5))
+        v = (math.cos(ang) * r, y, math.sin(ang) * r)
+        k = 0.72 + 0.5 * rnd.random()      # amassado: raios desiguais, como o plasma do filme
+        pts.append((v[0] * k, v[1] * k, v[2] * k))
+    arestas = set()
+    for i, a in enumerate(pts):
+        viz = sorted(range(n), key=lambda j: sum((a[c] - pts[j][c]) ** 2 for c in range(3)))[1:4]
+        for j in viz:
+            arestas.add((min(i, j), max(i, j)))
+    fagulhas = [(rnd.random() * 2 * math.pi, rnd.random() * 2 - 1, 0.3 + 0.9 * rnd.random(), rnd.random())
+                for _ in range(34)]
+    return pts, sorted(arestas), fagulhas
+
+
+_PLASMA = _malha_plasma()
+
+
 # skins: estilo de desenho + cores dos estados ativos
 TEMAS = {
     "ultron": {"nome": "Ultron (holograma)", "estilo": "ultron",
@@ -58,6 +83,8 @@ TEMAS = {
                   "cores": _paleta("#e9b04a", "#f4c463", "#ffd77a", "#ffcf5c", "#ff9d3c", "#ffb84d")},
     "azul": {"nome": "Azul", "estilo": "esfera",
              "cores": _paleta("#3d8bff", "#38c8ff", "#33e0ff", "#2fd6ff", "#8f6bff", "#b26bff")},
+    "plasma": {"nome": "Ultron (plasma)", "estilo": "plasma",
+               "cores": _paleta("#3aa8ff", "#52bcff", "#7ad0ff", "#62c6ff", "#ff5a4a", "#ff8a3a")},
     "reator": {"nome": "Reator", "estilo": "reator",
                "cores": _paleta("#5fd8ff", "#8ae8ff", "#b8f4ff", "#9eefff", "#5fb4ff", "#ffd36b")},
     "hal": {"nome": "HAL", "estilo": "olho",
@@ -889,6 +916,92 @@ class Gadget(QWidget):
             p.setBrush(verde.lighter(130))
             p.setPen(Qt.NoPen)
             p.drawEllipse(QPointF(px, py), pr * 0.18, pr * 0.18)
+        self._arco_pensando(p, est, t, R + 12, 2)
+
+    def _estilo_plasma(self, p, est, t, centro):
+        """Ultron nascendo: esfera de plasma azul com a casca de energia amassada, filamentos e fagulhas."""
+        pts, arestas, fagulhas = _PLASMA
+        vel = {"ouvindo": 0.9, "conversa": 0.6, "pensando": 1.8, "agindo": 2.6}.get(est, 0.35)
+        giro = t * vel
+        cg, sg = math.cos(giro), math.sin(giro)
+        incl = 0.42 + 0.12 * math.sin(t * 0.3)
+        ci, si = math.cos(incl), math.sin(incl)
+        pulso = 1 + 0.05 * math.sin(t * 2.2) + 0.28 * self.nivel
+        escala = R * 0.98 * pulso
+        # corpo translúcido
+        g = QRadialGradient(centro, escala * 1.15)
+        c0 = QColor(self.cor).darker(320)
+        c0.setAlphaF(0.78)
+        g.setColorAt(0.0, c0)
+        c1 = QColor(self.cor).darker(200)
+        c1.setAlphaF(0.30)
+        g.setColorAt(0.8, c1)
+        c2 = QColor(self.cor)
+        c2.setAlphaF(0.0)
+        g.setColorAt(1.0, c2)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(g))
+        p.drawEllipse(centro, escala * 1.15, escala * 1.15)
+        # vértices girados e projetados; a casca "respira" e treme quando fala
+        proj = []
+        for i, (x, y, z) in enumerate(pts):
+            tremor = 1 + (0.06 + 0.22 * self.nivel) * math.sin(t * 3.1 + i * 1.9)
+            x, y, z = x * tremor, y * tremor, z * tremor
+            x, z = x * cg + z * sg, -x * sg + z * cg
+            y, z = y * ci - z * si, y * si + z * ci
+            proj.append((CX + x * escala, CY + y * escala, z))
+        # filamentos da casca (mais claros na frente) e centelha nos nós
+        for a, b in arestas:
+            xa, ya, za = proj[a]
+            xb, yb, zb = proj[b]
+            prof = 0.5 + 0.5 * (za + zb) / 2
+            c = QColor(self.cor).lighter(110 + int(70 * prof))
+            c.setAlphaF(min(1.0, (0.18 + 0.55 * prof) * (0.5 + self.brilho)))
+            p.setPen(QPen(c, 0.8 + 1.1 * prof))
+            p.drawLine(QPointF(xa, ya), QPointF(xb, yb))
+        for x, y, z in proj:
+            prof = 0.5 + 0.5 * z
+            c = QColor(self.cor).lighter(170)
+            c.setAlphaF(0.25 + 0.6 * prof)
+            p.setPen(Qt.NoPen)
+            p.setBrush(c)
+            p.drawEllipse(QPointF(x, y), 1.0 + 1.3 * prof, 1.0 + 1.3 * prof)
+        # raios internos ligando o núcleo a alguns nós (a rede neural acendendo)
+        ativos = 5 if est in ("pensando", "agindo") else 3
+        for k in range(ativos):
+            x, y, z = proj[int(t * (3 if est in ("pensando", "agindo") else 1.2) + k * 9) % len(proj)]
+            c = QColor(self.cor).lighter(190)
+            c.setAlphaF(0.35 + 0.4 * self.brilho)
+            p.setPen(QPen(c, 1.0))
+            meio = QPointF((CX + x) / 2 + 5 * math.sin(t * 9 + k), (CY + y) / 2 + 5 * math.cos(t * 8 + k))
+            caminho = QPainterPath(QPointF(CX, CY))
+            caminho.quadTo(meio, QPointF(x, y))
+            p.setBrush(Qt.NoBrush)
+            p.drawPath(caminho)
+        # fagulhas que escapam da casca
+        for ang0, alt, vida, fase in fagulhas:
+            ciclo = ((t * 0.25 * vida + fase) % 1.0)
+            ang = ang0 + t * 0.2
+            rr = escala * (0.7 + 0.55 * ciclo) * math.sqrt(max(0.0, 1 - alt * alt * 0.5))
+            c = QColor(self.cor).lighter(200)
+            c.setAlphaF((1 - ciclo) * 0.8 * min(1.0, 0.4 + self.brilho))
+            p.setPen(Qt.NoPen)
+            p.setBrush(c)
+            p.drawEllipse(QPointF(CX + math.cos(ang) * rr, CY + alt * escala * 0.8 + math.sin(ang) * rr * 0.15),
+                          1.0 + 0.8 * (1 - ciclo), 1.0 + 0.8 * (1 - ciclo))
+        # núcleo branco-azulado que pulsa com a voz
+        nucleo = R * (0.17 + 0.16 * self.nivel) + 1.5 * math.sin(t * 3) * self.brilho
+        g = QRadialGradient(centro, nucleo * 2.6)
+        g.setColorAt(0.0, QColor(255, 255, 255, 255))
+        c3 = QColor(self.cor).lighter(160)
+        c3.setAlphaF(0.85)
+        g.setColorAt(0.35, c3)
+        c4 = QColor(self.cor)
+        c4.setAlphaF(0.0)
+        g.setColorAt(1.0, c4)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(g))
+        p.drawEllipse(centro, nucleo * 2.6, nucleo * 2.6)
         self._arco_pensando(p, est, t, R + 12, 2)
 
     def _estilo_reator(self, p, est, t, centro):

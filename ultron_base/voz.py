@@ -1,5 +1,6 @@
 """Voz 100% local: fala -> texto com faster-whisper na GPU (large-v3-turbo) e texto -> fala com
-Kokoro (onnx, CPU). Toda a saída é PCM s16le, 24 kHz, mono.
+XTTS-v2 (GPU, voz grave e natural em pt-BR) ou, se ele não estiver instalado, Kokoro (onnx, CPU).
+Toda a saída é PCM s16le, 24 kHz, mono.
 
 Medido numa RTX 3060: 6 s de fala transcritos em 0,33 s (~0,8 GB de VRAM); Kokoro gera ~4x mais
 rápido que o tempo real numa CPU Xeon E5-2680 v3.
@@ -19,6 +20,10 @@ DADOS = os.environ.get("ULTRON_DADOS", os.path.expanduser("~/.local/share/ultron
 MODELOS = os.environ.get("ULTRON_MODELOS", os.path.join(DADOS, "modelos"))
 
 VOZES = {"masculino": "pm_alex", "feminino": "pf_dora"}
+# vozes do XTTS-v2 (grave para o Ultron); troque com ULTRON_VOZ_MASCULINA / ULTRON_VOZ_FEMININA
+VOZES_XTTS = {"masculino": os.environ.get("ULTRON_VOZ_MASCULINA", "Damien Black"),
+              "feminino": os.environ.get("ULTRON_VOZ_FEMININA", "Ana Florence")}
+MOTOR = os.environ.get("ULTRON_VOZ", "xtts")      # xtts | kokoro
 # grafias que o Kokoro pronuncia melhor
 PRONUNCIA = {r"\bUltron\b": "Últron", r"\bultron\b": "últron", r"\bIA\b": "I A", r"\bGPU\b": "gê pê u"}
 
@@ -74,7 +79,7 @@ class Ouvido:
         return " ".join(s.text.strip() for s in segs).strip()
 
 
-def limpar_para_fala(texto):
+def limpar_para_fala(texto, motor="kokoro"):
     texto = re.sub(r"```.*?```", " ", texto, flags=re.S)
     texto = re.sub(r"`([^`]*)`", r"\1", texto)
     texto = re.sub(r"https?://\S+", "o link", texto)
@@ -82,11 +87,12 @@ def limpar_para_fala(texto):
     texto = re.sub(r"^\s*#+\s*", "", texto, flags=re.M)
     texto = re.sub(r"[*_~|>#]", "", texto)
     for padrao, troca in PRONUNCIA.items():
-        texto = re.sub(padrao, troca, texto)
+        if motor == "kokoro" or "ltron" not in padrao:     # só o Kokoro precisa do acento em "Ultron"
+            texto = re.sub(padrao, troca, texto)
     return re.sub(r"\s+", " ", texto).strip()
 
 
-class Boca:
+class BocaKokoro:
     """Kokoro-82M (onnx) com as vozes brasileiras: pm_alex, pm_santa (masculinas) e pf_dora."""
 
     def __init__(self, genero="masculino"):
@@ -116,6 +122,72 @@ class Boca:
             return
         loop = asyncio.get_running_loop()
         pcm = await loop.run_in_executor(None, self._gerar, texto)
+        for i in range(0, len(pcm), 9600):
+            yield pcm[i:i + 9600]
+
+
+class BocaXTTS:
+    """XTTS-v2 na GPU (~2 GB de VRAM): voz natural em português, com vozes embutidas (sem clonar ninguém)."""
+
+    def __init__(self, genero="masculino"):
+        self.voz = VOZES_XTTS.get(genero, VOZES_XTTS["masculino"])
+        self._tts = None
+
+    def definir_genero(self, genero):
+        self.voz = VOZES_XTTS.get(genero, VOZES_XTTS["masculino"])
+
+    def _modelo(self):
+        if self._tts is None:
+            os.environ.setdefault("COQUI_TOS_AGREED", "1")
+            os.environ.setdefault("TTS_HOME", os.path.join(MODELOS, "xtts"))
+            os.environ.setdefault("HF_HUB_OFFLINE", "1")
+            import torch
+            from TTS.api import TTS
+
+            t0 = time.time()
+            self._tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to("cuda" if torch.cuda.is_available() else "cpu")
+            log.info("xtts carregado em %.1fs", time.time() - t0)
+        return self._tts
+
+    def _gerar(self, texto):
+        audio = self._modelo().tts(text=texto, speaker=self.voz, language="pt", split_sentences=False)
+        audio = np.asarray(audio, dtype=np.float32)
+        return (np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes()
+
+
+class Boca:
+    """Escolhe o motor de voz (XTTS por padrão); se ele não estiver instalado ou falhar, cai para o Kokoro."""
+
+    def __init__(self, genero="masculino"):
+        self.genero = genero
+        self.motor = BocaXTTS(genero) if MOTOR == "xtts" else BocaKokoro(genero)
+        self.nome = "xtts" if MOTOR == "xtts" else "kokoro"
+
+    def definir_genero(self, genero):
+        self.genero = genero
+        self.motor.definir_genero(genero)
+
+    def aquecer(self):
+        """Carrega o modelo de voz antes da primeira fala (o XTTS leva uns 15 s para subir na GPU)."""
+        try:
+            self.motor._gerar("Pronto.")
+        except Exception as e:
+            log.warning("aquecimento da voz falhou: %s", e)
+
+    async def falar(self, texto):
+        texto = limpar_para_fala(texto, self.nome)
+        if not re.search(r"\w", texto):
+            return
+        loop = asyncio.get_running_loop()
+        try:
+            pcm = await loop.run_in_executor(None, self.motor._gerar, texto)
+        except Exception as e:
+            if self.nome != "xtts":
+                raise
+            log.warning("xtts indisponível (%s); usando o Kokoro", e)
+            self.motor, self.nome = BocaKokoro(self.genero), "kokoro"
+            texto = limpar_para_fala(texto, "kokoro")
+            pcm = await loop.run_in_executor(None, self.motor._gerar, texto)
         for i in range(0, len(pcm), 9600):
             yield pcm[i:i + 9600]
 

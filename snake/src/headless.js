@@ -61,7 +61,7 @@ export async function runHeadless({ prompt, config, catalog, session, json = fal
     await mcp.startAll()
     const failed = mcp.clients.filter((client) => client.status !== 'ok')
     if (failed.length) throw new Error(failed.map((client) => `MCP ${client.name}: ${client.error}`).join('; '))
-    agent.extraTools = mcp.tools()
+    agent.extraTools = mcp.agentTools()
     await agent.run(prompt, { signal: controller.signal })
   } catch (e) {
     error = e

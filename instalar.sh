@@ -10,6 +10,8 @@ BIN="$HOME/.local/bin"
 UNIDADES="$HOME/.config/systemd/user"
 VOSK_URL="https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip"
 KOKORO_URL="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+BRAIN_ULTRON_RELEASE="${BRAIN_ULTRON_RELEASE:-brain-ultron-v1}"
+BRAIN_ULTRON_URL="https://github.com/Denilsonnofficial/ultron/releases/download/$BRAIN_ULTRON_RELEASE"
 MODELO_BASE="${ULTRON_MODELO_BASE:-qwen3.5:9b}"     # medido: 0,15 s até a 1ª palavra numa RTX 3060
 PORTA="${ULTRON_PORTA:-8792}"
 CONFIGURAR=1
@@ -31,7 +33,7 @@ for a in "$@"; do
             "$HOME/.config/environment.d/ultron.conf"
       systemctl --user daemon-reload 2>/dev/null || true
       printf '  A memória, os modelos de voz e as configurações ficaram em %s e ~/.config/ultron.\n' "$RAIZ"
-      printf '  O modelo do Ollama continua instalado: ollama rm ultron-cerebro %s\n' "$MODELO_BASE"
+      printf '  O modelo do Ollama continua instalado: ollama rm brain-ultron %s\n' "$MODELO_BASE"
       exit 0 ;;
     *) erro "opção desconhecida: $a" ;;
   esac
@@ -98,13 +100,42 @@ if ! curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
   for _ in $(seq 30); do curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && break; sleep 1; done
 fi
 curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1 || erro "o Ollama não respondeu em 127.0.0.1:11434"
-if ! ollama list | grep -q "^${MODELO_BASE%%:*}:${MODELO_BASE##*:} "; then
-  passo "Baixando o modelo $MODELO_BASE (uns 6,6 GB)"
-  ollama pull "$MODELO_BASE"
+# cérebro: brain-ultron (Qwen2.5 7B abliterated + QLoRA, veja brain-ultron/). O GGUF não vai no git:
+# usa o modelo já registrado no Ollama, ou o arquivo apontado em BRAIN_ULTRON_GGUF, ou o primeiro .gguf de brain-ultron/.
+if ollama list | grep -q "^brain-ultron:"; then
+  passo "Cérebro: brain-ultron já está no Ollama"
+else
+  GGUF="${BRAIN_ULTRON_GGUF:-$(ls "$AQUI"/brain-ultron/*.gguf 2>/dev/null | head -n1)}"
+  if [ -z "$GGUF" ] || [ ! -s "$GGUF" ]; then
+    # baixa da release do GitHub (3 partes de <2 GB), junta e confere o SHA256
+    GGUF="$DADOS/modelos/brain-ultron/brain-ultron.Q4_K_M.gguf"; mkdir -p "$(dirname "$GGUF")"
+    if [ ! -s "$GGUF" ]; then
+      passo "Baixando o brain-ultron (4,7 GB) da release $BRAIN_ULTRON_RELEASE"
+      rm -f "$GGUF.tmp"; ok=1
+      for parte in 00 01 02; do
+        curl -fL --retry 3 --progress-bar "$BRAIN_ULTRON_URL/brain-ultron.Q4_K_M.gguf.part-$parte" >> "$GGUF.tmp" || { ok=0; break; }
+      done
+      esperado="$(curl -fsSL "$BRAIN_ULTRON_URL/SHA256SUMS" 2>/dev/null | awk '$2=="brain-ultron.Q4_K_M.gguf"{print $1}')"
+      if [ "$ok" = 1 ] && [ -n "$esperado" ] && [ "$(sha256sum "$GGUF.tmp" | cut -d' ' -f1)" = "$esperado" ]; then
+        mv "$GGUF.tmp" "$GGUF"
+      else
+        rm -f "$GGUF.tmp"; GGUF=""; aviso "o download do brain-ultron falhou ou não bateu com o SHA256"
+      fi
+    fi
+  fi
+  if [ -n "$GGUF" ] && [ -s "$GGUF" ]; then
+    passo "Registrando o brain-ultron no Ollama ($GGUF)"
+    tmpm="$(mktemp)"; sed "s#^FROM .*#FROM $GGUF#" "$AQUI/brain-ultron/Modelfile" > "$tmpm"
+    ollama create brain-ultron -f "$tmpm" >/dev/null; rm -f "$tmpm"
+  else
+    passo "brain-ultron não encontrado: usando $MODELO_BASE (aponte BRAIN_ULTRON_GGUF=/caminho/modelo.gguf para o cérebro próprio)"
+    if ! ollama list | grep -q "^${MODELO_BASE%%:*}:${MODELO_BASE##*:} "; then
+      ollama pull "$MODELO_BASE"
+    fi
+    tmpm="$(mktemp)"; printf 'FROM %s\nPARAMETER num_ctx 16384\n' "$MODELO_BASE" > "$tmpm"
+    ollama create brain-ultron -f "$tmpm" >/dev/null; rm -f "$tmpm"
+  fi
 fi
-passo "Criando o modelo ultron-cerebro ($MODELO_BASE com janela de 16 mil tokens)"
-tmpm="$(mktemp)"; printf 'FROM %s\nPARAMETER num_ctx 16384\n' "$MODELO_BASE" > "$tmpm"
-ollama create ultron-cerebro -f "$tmpm" >/dev/null; rm -f "$tmpm"
 
 # ---------------------------------------------------------------- ambiente python
 passo "Ambiente Python em $RAIZ/venv"
@@ -115,6 +146,9 @@ PY="$RAIZ/venv/bin/python"
 passo "Pacotes de voz (Whisper na GPU, Kokoro) — alguns GB na primeira vez"
 "$PY" -m pip install -q --disable-pip-version-check aiohttp websockets numpy vosk sounddevice \
   faster-whisper nvidia-cublas-cu12 nvidia-cudnn-cu12 kokoro-onnx
+passo "Voz XTTS-v2 (GPU, natural em pt-BR) — torch + coqui-tts"
+"$PY" -m pip install -q --disable-pip-version-check torch torchaudio torchcodec coqui-tts "transformers==4.55.4" soundfile \
+  || aviso "XTTS não instalou: o Ultron usa o Kokoro"
 if ! "$PY" -c 'import PySide6.QtWidgets' 2>/dev/null; then
   passo "Instalando a interface (PySide6)"
   "$PY" -m pip install -q --disable-pip-version-check PySide6-Essentials
@@ -128,7 +162,13 @@ find "$APP" -name __pycache__ -prune -exec rm -rf {} +
 chmod +x "$APP"/bin/* "$APP/snake/bin/snake.js"
 
 # ---------------------------------------------------------------- modelos de voz
-mkdir -p "$DADOS/modelos/kokoro"
+mkdir -p "$DADOS/modelos/kokoro" "$DADOS/modelos/xtts"
+if ! ls "$DADOS"/modelos/xtts/tts/*xtts_v2*/model.pth >/dev/null 2>&1; then
+  passo "Baixando a voz XTTS-v2 (1,9 GB, só nesta vez; depois roda 100% local)"
+  COQUI_TOS_AGREED=1 TTS_HOME="$DADOS/modelos/xtts" "$PY" -c \
+    'from TTS.utils.manage import ModelManager; ModelManager().download_model("tts_models/multilingual/multi-dataset/xtts_v2")' \
+    || aviso "XTTS não baixou: o Ultron usa o Kokoro"
+fi
 for f in kokoro-v1.0.onnx voices-v1.0.bin; do
   if [ ! -s "$DADOS/modelos/kokoro/$f" ]; then
     passo "Baixando a voz local Kokoro ($f)"

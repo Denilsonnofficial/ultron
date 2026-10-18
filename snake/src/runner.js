@@ -40,7 +40,7 @@ export class Runner {
     entry.controller = new AbortController()
     const task = async () => {
       try {
-        if (!entry.connected) { await entry.mcp.startAll(); entry.agent.extraTools = entry.mcp.tools(); entry.connected = true }
+        if (!entry.connected) { await entry.mcp.startAll(); entry.agent.extraTools = entry.mcp.agentTools(); entry.connected = true }
         await entry.agent.run(prompt, { signal: entry.controller.signal })
         return { stopReason: entry.controller.signal.aborted ? 'cancelled' : 'end_turn', result: [...entry.session.messages].reverse().find((m) => m.role === 'assistant')?.content || '', sessionId: id }
       } catch (e) {

@@ -63,6 +63,7 @@ export const DEFAULTS = {
   hooks: {},
   formatters: {},
   diagnostics: true, // verificação de sintaxe depois de cada edição (node --check, python ast, bash -n, JSON)
+  autoResume: true, // com o agente parado, aviso de processo/subagente em 2º plano inicia um turno sozinho
   lsp: {},
   bgJobs: true,
   extraDirs: [],
