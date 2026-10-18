@@ -10,6 +10,7 @@ import glob
 import logging
 import os
 import re
+import threading
 import time
 
 import numpy as np
@@ -132,25 +133,38 @@ class BocaXTTS:
     def __init__(self, genero="masculino"):
         self.voz = VOZES_XTTS.get(genero, VOZES_XTTS["masculino"])
         self._tts = None
+        self._trava = threading.Lock()      # o aquecimento e a 1ª fala não podem carregar o modelo duas vezes (VRAM)
 
     def definir_genero(self, genero):
         self.voz = VOZES_XTTS.get(genero, VOZES_XTTS["masculino"])
 
     def _modelo(self):
         if self._tts is None:
+            self._carregar()
+        return self._tts
+
+    def _carregar(self):
+        with self._trava:
+            if self._tts is not None:
+                return
             os.environ.setdefault("COQUI_TOS_AGREED", "1")
             os.environ.setdefault("TTS_HOME", os.path.join(MODELOS, "xtts"))
             os.environ.setdefault("HF_HUB_OFFLINE", "1")
+            os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")   # divide os 12 GB com Ollama e Whisper
             import torch
             from TTS.api import TTS
 
             t0 = time.time()
             self._tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to("cuda" if torch.cuda.is_available() else "cpu")
             log.info("xtts carregado em %.1fs", time.time() - t0)
-        return self._tts
 
     def _gerar(self, texto):
-        audio = self._modelo().tts(text=texto, speaker=self.voz, language="pt", split_sentences=False)
+        self._modelo()
+        with self._trava:                           # uma fala por vez na GPU
+            audio = self._tts.tts(text=texto, speaker=self.voz, language="pt", split_sentences=False)
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()                # devolve a memória temporária para o Ollama/Whisper
         audio = np.asarray(audio, dtype=np.float32)
         return (np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes()
 

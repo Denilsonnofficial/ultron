@@ -140,7 +140,14 @@ fi
 # ---------------------------------------------------------------- ambiente python
 passo "Ambiente Python em $RAIZ/venv"
 mkdir -p "$RAIZ" "$DADOS" "$BIN"
-[ -x "$RAIZ/venv/bin/python" ] || python3 -m venv --system-site-packages "$RAIZ/venv"
+if [ ! -x "$RAIZ/venv/bin/python" ]; then
+  # torch/coqui-tts ainda não têm rodas para o Python 3.13+: com o uv (Python 3.12 isolado) a voz XTTS instala
+  if python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 13) else 1)' && command -v uv >/dev/null 2>&1; then
+    uv venv --python 3.12 --seed "$RAIZ/venv" >/dev/null 2>&1 || python3 -m venv --system-site-packages "$RAIZ/venv"
+  else
+    python3 -m venv --system-site-packages "$RAIZ/venv"
+  fi
+fi
 PY="$RAIZ/venv/bin/python"
 "$PY" -m pip install -q --disable-pip-version-check --upgrade pip >/dev/null 2>&1 || true
 passo "Pacotes de voz (Whisper na GPU, Kokoro) — alguns GB na primeira vez"
